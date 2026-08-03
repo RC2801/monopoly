@@ -102,6 +102,10 @@ const PC = ["#F0574A", "#5C8CFF", "#3ED198", "#F5B13D"];
 const PCD = ["#7E211A", "#1E3A8F", "#0F6B4C", "#8A5B10"];
 
 /* ---------- cast-metal playing pieces ---------- */
+const SEATS = { 2: ["B", "T"], 3: ["B", "L", "R"], 4: ["B", "L", "T", "R"] };
+const SEAT_ROT = { B: 0, L: 90, T: 180, R: -90 };
+const seatPlan = (n) => SEATS[n] || SEATS[4];
+
 const KINDS = ["hat", "car", "dog", "cat", "duck", "penguin", "ship", "iron"];
 const KIND_NAME = { hat: "Top Hat", car: "Roadster", dog: "Terrier", cat: "Cat",
   duck: "Duck", penguin: "Penguin", ship: "Battleship", iron: "Flat Iron" };
@@ -386,6 +390,7 @@ function shuffle(a) {
 const CSS = `
 @import url('https://fonts.googleapis.com/css2?family=Archivo+Narrow:wght@500;600;700&family=Inter:wght@400;500;600;700;800&family=Instrument+Serif:ital@0;1&display=swap');
 :root {
+  --seatH: clamp(84px, 11.5vmin, 122px);
   --ui: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --dis: 'Instrument Serif', 'Times New Roman', Georgia, serif;
   --cond: 'Archivo Narrow', 'Inter', system-ui, sans-serif;
@@ -430,78 +435,82 @@ button { touch-action: manipulation; }
 .hBtn:active { transform: scale(.94); }
 .hBtn.off { opacity: .38; }
 
-.main { flex: 1; display: flex; gap: 8px; min-height: 0; padding: 4px 9px 8px; }
-.rail { width: clamp(96px, 26%, 156px); flex: none; display: flex; flex-direction: column; gap: 0;
-  overflow-y: auto; min-height: 0; scrollbar-width: none; }
-.rail::-webkit-scrollbar { display: none; }
-.boardWrap { flex: 1; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+.table { flex: 1; display: grid; min-height: 0; gap: 6px; padding: 2px 8px 8px;
+  grid-template-columns: var(--seatH) minmax(0,1fr) var(--seatH);
+  grid-template-rows: var(--seatH) minmax(0,1fr) var(--seatH);
+  grid-template-areas: ". t ." "l b r" ". s ."; }
+.seatT { grid-area: t; } .seatL { grid-area: l; } .seatR { grid-area: r; } .seatB { grid-area: s; }
+.boardCell { grid-area: b; display: flex; align-items: center; justify-content: center; min-width: 0; min-height: 0; }
+.seat { display: flex; align-items: center; justify-content: center; overflow: hidden; }
+.seatL, .seatR { container-type: size; }
+.seatL .pnl, .seatR .pnl { width: 100cqh; height: 100cqw; flex: none; }
+.seatL .pnl { transform: rotate(90deg); }
+.seatR .pnl { transform: rotate(-90deg); }
+.seatT .pnl { transform: rotate(180deg); }
 
-.railHead { display: flex; align-items: center; justify-content: space-between; gap: 4px;
-  border-bottom: 1px solid currentColor; padding: 0 2px 5px; margin-bottom: 7px; flex: none; }
-.railName { flex: 1; min-width: 0; border: none; background: transparent; color: currentColor;
-  font-family: var(--ui); font-size: 12px; font-weight: 700; letter-spacing: .01em; outline: none; padding: 2px 0; }
-.railName:focus { background: rgba(255,255,255,.07); border-radius: 5px; padding: 2px 4px; }
-.railCount { font-family: var(--cond); font-size: 9px; letter-spacing: .12em; text-transform: uppercase;
-  color: var(--dim2); flex: none; }
-.railNone { font-family: var(--cond); font-size: 10px; letter-spacing: .1em; color: var(--dim2);
-  text-transform: uppercase; padding: 10px 2px; }
+.pnl { position: relative; width: 100%; height: 100%; display: flex; align-items: center; gap: 9px;
+  background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
+  border: 1px solid var(--line); border-radius: 13px; padding: 7px 10px; backdrop-filter: blur(6px);
+  transition: border-color .3s ease, box-shadow .3s ease; }
+.pnlCur { border-color: currentColor; box-shadow: 0 0 0 1px currentColor, 0 8px 26px rgba(0,0,0,.5); }
+.pnlDead { opacity: .32; filter: grayscale(1); }
+.pnlWho { display: flex; align-items: center; gap: 7px; flex: none; max-width: 172px; }
+.pawn.pnlPawn { width: 28px; height: 30px; flex: none; }
+.pnlId { min-width: 0; }
+.pnlName { display: block; width: 100%; max-width: 104px; border: none; background: transparent; color: currentColor;
+  font-family: var(--ui); font-size: 12px; font-weight: 700; outline: none; padding: 1px 0; }
+.pnlName:focus { background: rgba(255,255,255,.08); border-radius: 5px; padding: 1px 4px; }
+.pnlCash { font-size: 15px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; letter-spacing: -.01em; }
+.pnlFlags { display: flex; flex-direction: column; gap: 2px; font-size: 10px; flex: none; }
+.mini { border: 1px solid var(--line2); border-radius: 3px; padding: 0 3px; font-size: 7.5px; letter-spacing: .08em; color: var(--dim2); }
 
-.dcard { position: relative; background: linear-gradient(180deg, #24221F, #1B1917);
-  border: 1px solid var(--line); border-radius: 9px; overflow: hidden; flex: none; cursor: pointer;
-  box-shadow: 0 -4px 10px rgba(0,0,0,.45); transition: margin .3s cubic-bezier(.2,.85,.3,1),
-    transform .3s cubic-bezier(.2,.85,.3,1), box-shadow .3s ease; }
-.dcard + .dcard { margin-top: -7px; }
-.dcard:active { transform: scale(.985); }
-.dcOpen { margin-top: 7px !important; margin-bottom: 7px; z-index: 3;
-  border-color: var(--line2); box-shadow: 0 12px 30px rgba(0,0,0,.6); }
-.dcard:first-child { margin-top: 0; }
-.dcardM { opacity: .55; }
-.dcLive { display: flex; justify-content: space-between; gap: 6px; padding: 3px 6px 10px;
-  font-family: var(--cond); font-size: 10px; letter-spacing: .04em; color: var(--dim2); }
-.dcLive b { color: var(--ink); font-size: 11.5px; font-variant-numeric: tabular-nums; }
-.dcBody { max-height: 0; overflow: hidden; transition: max-height .34s cubic-bezier(.2,.85,.3,1); }
-.dcOpen .dcBody { max-height: 240px; }
-.dcOpen + .dcard { margin-top: 0; }
-.dcBar { height: 13px; box-shadow: inset 0 -1px 3px rgba(0,0,0,.35); }
-.dcName { font-family: var(--cond); font-size: 11px; font-weight: 700; letter-spacing: .04em;
-  text-transform: uppercase; color: var(--ink); padding: 5px 6px 2px; line-height: 1.1; }
-.dcPrice { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; padding: 0 6px 4px;
-  font-family: var(--cond); font-size: 10px; color: var(--dim); }
-.dcH { background: rgba(255,255,255,.12); border-radius: 3px; padding: 0 3px; font-size: 9px; color: var(--ink); }
-.dcM { background: rgba(200,70,60,.3); color: #F1A79D; border-radius: 3px; padding: 0 3px; font-size: 8px; letter-spacing: .06em; }
-.dcRows { border-top: 1px solid var(--line); }
-.dcRow { display: flex; justify-content: space-between; gap: 6px; padding: 1.5px 6px;
-  font-family: var(--cond); font-size: 9.5px; color: var(--dim2); }
-.dcRow b { color: var(--dim); font-variant-numeric: tabular-nums; font-weight: 600; }
-.dcNow { background: rgba(255,255,255,.09); color: var(--ink); }
-.dcNow b { color: var(--ink); }
-.dcFoot { display: flex; flex-wrap: wrap; gap: 3px 8px; border-top: 1px solid var(--line);
-  padding: 4px 6px 5px; font-family: var(--cond); font-size: 8.5px; letter-spacing: .04em; color: var(--dim2); }
-.dcFoot b { color: var(--dim); font-weight: 600; }
-
-.strip { display: grid; gap: 6px; padding: 0 9px 9px;
-  padding-bottom: calc(9px + env(safe-area-inset-bottom)); }
-.chip { position: relative; background: linear-gradient(180deg, rgba(255,255,255,.055), rgba(255,255,255,.02));
-  border: 1px solid var(--line); border-radius: 12px; padding: 6px 7px; display: flex; flex-direction: column;
-  gap: 2px; cursor: pointer; min-width: 0; backdrop-filter: blur(6px); }
-.chipSel { background: linear-gradient(180deg, rgba(255,255,255,.1), rgba(255,255,255,.04)); }
-.chipCur { border-color: currentColor; box-shadow: 0 0 0 1px currentColor, 0 6px 18px rgba(0,0,0,.5); }
-.chipDead { opacity: .35; filter: grayscale(1); }
-.chipTop { display: flex; gap: 4px; align-items: center; font-size: 10.5px; font-weight: 600; min-width: 0; color: var(--dim); }
-.pawn.chipPawn { width: 17px; height: 18px; flex: none; }
-.pawn.shPawn { width: 22px; height: 24px; flex: none; }
-.chipName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.chipCash { font-size: 13.5px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -.01em; color: var(--ink); }
-.chipLedger { display: flex; flex-wrap: wrap; gap: 2px; min-height: 12px; }
-.chipAmt { font-family: var(--cond); font-size: 9.5px; font-weight: 700; font-variant-numeric: tabular-nums;
-  border-radius: 3px; padding: 0 3px; background: rgba(255,255,255,.05); opacity: .5; }
-.chipAmt:nth-child(2) { opacity: .68; }
-.chipAmtNew { opacity: 1; animation: amtIn .45s cubic-bezier(.2,.9,.3,1.3); }
+.pnlActs { display: flex; flex-direction: column; gap: 4px; flex: none; }
+.pnlBtn { border: 1px solid var(--line2); background: rgba(255,255,255,.06); color: inherit;
+  border-radius: 7px; padding: 5px 9px; font-family: var(--ui); font-size: 10.5px; font-weight: 600;
+  cursor: pointer; letter-spacing: .01em; }
+.pnlBtn:active { transform: scale(.94); }
+.pnlCur .pnlBtn { border-color: rgba(0,0,0,.3); background: rgba(0,0,0,.14); }
+.pnlLedger { display: flex; flex-direction: column; gap: 2px; flex: none; min-width: 46px; }
+.pnlAmt { font-family: var(--cond); font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  border-radius: 4px; padding: 0 4px; background: rgba(255,255,255,.05); opacity: .48; text-align: center; }
+.pnlAmt:nth-child(2) { opacity: .68; }
+.pnlAmtNew { opacity: 1; animation: amtIn .45s cubic-bezier(.2,.9,.3,1.3); }
 @keyframes amtIn { from { transform: scale(.6); opacity: 0; } }
-.chipBadges { font-size: 9.5px; display: flex; gap: 4px; color: var(--dim2); align-items: center; }
-.mini { border: 1px solid var(--line2); border-radius: 3px; padding: 0 3px; font-size: 7.5px; letter-spacing: .08em; }
+
+.pnlDeeds { flex: 1; min-width: 0; height: 100%; display: flex; flex-wrap: nowrap; align-items: stretch;
+  gap: 4px; overflow-x: auto; overflow-y: hidden; scrollbar-width: none; padding: 1px 0; }
+.pnlDeeds::-webkit-scrollbar { display: none; }
+.pnlNone { font-family: var(--cond); font-size: 9.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim2); }
+.pd { position: relative; width: 76px; height: 100%; max-height: 90px; flex: none;
+  display: flex; flex-direction: column; align-items: stretch;
+  border: 1px solid var(--line2); border-radius: 6px; overflow: hidden; cursor: pointer;
+  background: linear-gradient(180deg, #24211E, #171614); font-family: var(--cond);
+  box-shadow: 0 3px 9px rgba(0,0,0,.4); }
+.pd:active { transform: scale(.95); }
+.pdM { opacity: .55; }
+.pdBar { display: block; height: 12px; position: relative; box-shadow: inset 0 -1px 3px rgba(0,0,0,.45); }
+.pdH { position: absolute; right: 2px; top: 0; font-size: 7.5px; font-weight: 700; color: #14120F;
+  background: rgba(255,255,255,.9); border-radius: 2px; padding: 0 3px; line-height: 1.5; }
+.pdN { display: block; font-size: 9px; font-weight: 700; letter-spacing: .03em; line-height: 1.06;
+  color: #EFE8DC; padding: 3px 4px 0; }
+.pdMid { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); margin: 3px 0 0; padding: 2px 3px; }
+.pdLbl { font-size: 7.5px; letter-spacing: .1em; text-transform: uppercase; color: var(--dim2); }
+.pdR { font-size: 12px; font-weight: 700; color: var(--ink); font-variant-numeric: tabular-nums; line-height: 1.1; }
+.pdFoot { font-size: 8px; color: var(--dim2); text-align: center; padding: 2px 0; letter-spacing: .04em; }
+
+/* the active seat is filled solid, so its contents flip to dark ink */
+.pnlCur .pnlCash, .pnlCur .pnlName { color: #171310; }
+.pnlCur .pnlName:focus { background: rgba(0,0,0,.14); }
+.pnlCur .pnlAmt { background: rgba(0,0,0,.16); }
+.pnlCur .fpos { color: #0C5B36; }
+.pnlCur .fneg { color: #7C1A11; }
+.pnlCur .mini { border-color: rgba(0,0,0,.32); color: rgba(0,0,0,.62); }
+.pnlCur .pnlNone { color: rgba(0,0,0,.5); }
+.pnlCur .pd { border-color: rgba(0,0,0,.28); box-shadow: 0 2px 6px rgba(0,0,0,.25); }
+.pnlCur .flt { text-shadow: none; }
 .camWrap { position: relative; width: 100%; aspect-ratio: 1/1; overflow: hidden; border-radius: 16px;
-  max-width: min(100%, calc(100dvh - 190px), 620px);
+  max-width: min(100%, calc(100dvh - 2 * var(--seatH, 110px) - 78px), 820px);
   box-shadow: 0 26px 60px rgba(0,0,0,.62), 0 0 0 1px rgba(240,228,205,.09),
     inset 0 0 60px rgba(0,0,0,.5); }
 .board { position: absolute; inset: 0; container-type: inline-size;
@@ -514,7 +523,7 @@ button { touch-action: manipulation; }
 
 .camWrap.iso { overflow: visible; box-shadow: none; border-radius: 0;
   perspective: 1500px; perspective-origin: 50% 44%;
-  max-width: min(100%, calc(100dvh - 190px), 780px); }
+  max-width: min(100%, calc(100dvh - 2 * var(--seatH, 110px) - 78px), 900px); }
 .iso .board { transform-style: preserve-3d; transform: rotateX(42deg) scale(.87);
   filter: drop-shadow(0 26px 30px rgba(0,0,0,.7)); border-radius: 10px; }
 .iso .tok { transform: translate(-50%,-84%) rotateX(-42deg); transform-origin: 50% 92%; }
@@ -524,8 +533,9 @@ button { touch-action: manipulation; }
 .cell { position: absolute; cursor: pointer; background: linear-gradient(180deg, var(--cellHi), var(--cell));
   border: 1px solid rgba(240,228,205,.07); box-shadow: inset 0 1px 0 rgba(255,255,255,.035); }
 .cell:active { filter: brightness(1.35); }
-.cInner { position: absolute; display: flex; flex-direction: column; align-items: center; justify-content: center;
-  gap: 3%; text-align: center; padding: 0 3%; box-sizing: border-box; }
+.cInner { position: absolute; }
+.cFace { width: 100%; height: 100%; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 4%; text-align: center; padding: 0 3%; box-sizing: border-box; }
 .bar { position: absolute; display: flex; align-items: center; justify-content: center; gap: 4%;
   box-shadow: inset 0 0 8px rgba(0,0,0,.35); }
 .hp { width: 1.15cqw; height: 1.15cqw; background: #F6F2E6; border-radius: 20%; box-shadow: 0 0 0 .4px rgba(0,0,0,.5); }
@@ -559,7 +569,8 @@ button { touch-action: manipulation; }
 @keyframes bob { 0%,100% { margin-top: 0; } 50% { margin-top: -.9cqw; } }
 
 .center { position: absolute; inset: 14.5%; display: flex; flex-direction: column; align-items: center;
-  justify-content: space-between; padding: 3cqw 3cqw 3.4cqw; }
+  justify-content: space-between; padding: 3cqw 3cqw 3.4cqw;
+  rotate: var(--turn, 0deg); transition: rotate .55s cubic-bezier(.2,.85,.25,1); }
 .wordmark { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
   font-family: var(--dis); font-size: 12cqw; letter-spacing: .2em; padding-left: .2em;
   color: rgba(240,228,205,.045); pointer-events: none; }
@@ -603,6 +614,7 @@ button { touch-action: manipulation; }
 .dueName { font-family: var(--cond); font-size: 16px; font-weight: 700; letter-spacing: .04em;
   text-transform: uppercase; color: var(--ink); line-height: 1.1; }
 .dueMeta { display: flex; align-items: center; gap: 6px; font-family: var(--cond); font-size: 12px; color: var(--dim); margin-top: 2px; }
+.dcH { background: rgba(255,255,255,.14); border-radius: 3px; padding: 0 4px; font-size: 10px; color: var(--ink); }
 .dueOwner { display: flex; align-items: center; gap: 6px; flex: none; text-align: right; }
 .pawn.duePawn { width: 24px; height: 26px; flex: none; }
 .dueOwnL { font-family: var(--cond); font-size: 8.5px; letter-spacing: .14em; text-transform: uppercase; color: var(--dim2); }
@@ -635,15 +647,15 @@ button { touch-action: manipulation; }
 @keyframes fadeUp { 0% { opacity: 0; transform: translateY(7px); } 20% { opacity: 1; } 100% { opacity: 0; transform: translateY(-16px); } }
 
 .scrim { position: fixed; inset: 0; background: rgba(4,4,3,.62); backdrop-filter: blur(3px); display: flex;
-  align-items: flex-end; justify-content: center; z-index: 50; animation: fadeIn .2s ease; }
+  align-items: center; justify-content: center; z-index: 50; animation: fadeIn .2s ease; }
 .scrimC { align-items: center; perspective: 900px; }
 @keyframes fadeIn { from { opacity: 0; } }
-.sheet { background: linear-gradient(180deg, #1E1C1A, #151413); width: 100%; max-width: 560px;
-  border-radius: 20px 20px 0 0; border-top: 1px solid var(--line2);
-  padding: 20px 16px 16px; padding-bottom: calc(16px + env(safe-area-inset-bottom));
-  animation: slideUp .3s cubic-bezier(.2,.9,.3,1); max-height: 82dvh; overflow-y: auto;
-  box-shadow: 0 -20px 60px rgba(0,0,0,.6); }
-@keyframes slideUp { from { transform: translateY(52px); opacity: .3; } }
+.sheet { background: linear-gradient(180deg, #1E1C1A, #151413); width: min(92%, 560px);
+  border-radius: 20px; border: 1px solid var(--line2); padding: 20px 16px 16px;
+  animation: slideUp .3s cubic-bezier(.2,.9,.3,1); max-height: min(82dvh, 82vw); overflow-y: auto;
+  box-shadow: 0 24px 70px rgba(0,0,0,.7); rotate: var(--seat, 0deg); }
+@keyframes slideUp { from { opacity: .2; scale: .94; } }
+.cardM, .cardBack, .deckWrap { rotate: var(--seat, 0deg); }
 .shTitle { font-size: 16px; font-weight: 700; letter-spacing: -.01em; display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
 .shSub { font-size: 12px; color: var(--dim); margin-bottom: 10px; line-height: 1.5; }
 .shSub2 { font-size: 12px; color: var(--dim2); margin: 8px 0; }
@@ -806,9 +818,9 @@ function TycoonGame() {
   const fid = useRef(0);
   const [setup, setSetup] = useState([
     { name: "Player 1", human: true, tok: "hat" },
-    { name: "Player 2", human: false, tok: "car" },
-    { name: "Player 3", human: false, tok: "dog" },
-    { name: "Player 4", human: false, tok: "duck" },
+    { name: "Player 2", human: true, tok: "car" },
+    { name: "Player 3", human: true, tok: "dog" },
+    { name: "Player 4", human: true, tok: "duck" },
   ]);
 
   const [muted, setMuted] = useState(false);
@@ -877,6 +889,7 @@ function TycoonGame() {
   function uiDone(v) {
     S.tap();
     const gg = Sr.current;
+    gg.sheetSeat = null;
     if (gg) gg.sheet = null;
     const r = uiRes.current;
     uiRes.current = null;
@@ -1475,88 +1488,96 @@ function TycoonGame() {
   }
 
   /* ---------- build / mortgage ---------- */
-  function canBuild(i) {
+  function canBuild(i, who) {
     const gg = Sr.current;
-    if (gg.debt) return false;
+    const w = who == null ? gg.cur : who;
+    if (gg.debt && w === gg.cur) return false;
     const sp = BOARD[i];
     if (sp.t !== "prop") return false;
-    if (gg.owner[i] !== gg.cur) return false;
-    if (!ownsFull(gg.cur, sp.g)) return false;
+    if (gg.owner[i] !== w) return false;
+    if (!ownsFull(w, sp.g)) return false;
     if (GIDX[sp.g].some((x) => gg.mort[x])) return false;
     const h = gg.houses[i] || 0;
     if (h >= 5) return false;
     const minH = Math.min(...GIDX[sp.g].map((x) => gg.houses[x] || 0));
     if (h > minH) return false;
-    return cur().cash >= GROUPS[sp.g].hc;
+    return gg.players[w].cash >= GROUPS[sp.g].hc;
   }
 
-  function build(i) {
+  function build(i, who) {
     const gg = Sr.current;
     const sp = BOARD[i];
-    const p = cur();
+    const w = who == null ? gg.cur : who;
+    const p = gg.players[w];
     gg.houses[i] = (gg.houses[i] || 0) + 1;
     p.cash -= GROUPS[sp.g].hc;
-    float(gg.cur, "-$" + GROUPS[sp.g].hc, true);
+    float(w, "-$" + GROUPS[sp.g].hc, true);
     log(p.name + " builds on " + sp.name + " (" + (gg.houses[i] === 5 ? "hotel 🏨" : gg.houses[i] + " 🏠") + ").");
     S.build();
     R();
   }
 
-  function canSell(i) {
+  function canSell(i, who) {
     const gg = Sr.current;
+    const w = who == null ? gg.cur : who;
     const sp = BOARD[i];
     if (sp.t !== "prop") return false;
-    if (gg.owner[i] !== gg.cur) return false;
+    if (gg.owner[i] !== w) return false;
     const h = gg.houses[i] || 0;
     if (h === 0) return false;
     const maxH = Math.max(...GIDX[sp.g].map((x) => gg.houses[x] || 0));
     return h === maxH;
   }
 
-  function sellHouse(i) {
+  function sellHouse(i, who) {
     const gg = Sr.current;
     const sp = BOARD[i];
-    const p = cur();
+    const w = who == null ? gg.cur : who;
+    const p = gg.players[w];
     gg.houses[i] -= 1;
     p.cash += GROUPS[sp.g].hc / 2;
-    float(gg.cur, "+$" + GROUPS[sp.g].hc / 2, false);
+    float(w, "+$" + GROUPS[sp.g].hc / 2, false);
     log(p.name + " sells a house on " + sp.name + ".");
     S.sell();
     R();
   }
 
-  function canMort(i) {
+  function canMort(i, who) {
     const gg = Sr.current;
+    const w = who == null ? gg.cur : who;
     const sp = BOARD[i];
-    if (gg.owner[i] !== gg.cur || gg.mort[i]) return false;
+    if (gg.owner[i] !== w || gg.mort[i]) return false;
     if (sp.t === "prop" && GIDX[sp.g].some((x) => (gg.houses[x] || 0) > 0)) return false;
     return true;
   }
 
-  function mortgage(i) {
+  function mortgage(i, who) {
     const gg = Sr.current;
-    const p = cur();
+    const w = who == null ? gg.cur : who;
+    const p = gg.players[w];
     gg.mort[i] = true;
     p.cash += BOARD[i].price / 2;
-    float(gg.cur, "+$" + BOARD[i].price / 2, false);
+    float(w, "+$" + BOARD[i].price / 2, false);
     log(p.name + " mortgages " + BOARD[i].name + ".");
     S.sell();
     R();
   }
 
-  function canUnmort(i) {
+  function canUnmort(i, who) {
     const gg = Sr.current;
-    if (gg.debt) return false;
-    return gg.owner[i] === gg.cur && !!gg.mort[i] && cur().cash >= Math.ceil(BOARD[i].price * 0.55);
+    const w = who == null ? gg.cur : who;
+    if (gg.debt && w === gg.cur) return false;
+    return gg.owner[i] === w && !!gg.mort[i] && gg.players[w].cash >= Math.ceil(BOARD[i].price * 0.55);
   }
 
-  function unmortgage(i) {
+  function unmortgage(i, who) {
     const gg = Sr.current;
-    const p = cur();
+    const w = who == null ? gg.cur : who;
+    const p = gg.players[w];
     const c = Math.ceil(BOARD[i].price * 0.55);
     gg.mort[i] = false;
     p.cash -= c;
-    float(gg.cur, "-$" + c, true);
+    float(w, "-$" + c, true);
     log(p.name + " lifts the mortgage on " + BOARD[i].name + ".");
     S.buy();
     R();
@@ -1657,11 +1678,12 @@ function TycoonGame() {
     }).sort((a, b) => a - b);
   }
 
-  function openTrade() {
+  function openTrade(who) {
     const gg = Sr.current;
-    const others = alive().filter((p) => p.id !== gg.cur);
+    const w = who == null ? gg.cur : who;
+    const others = alive().filter((p) => p.id !== w);
     if (others.length === 0) return;
-    gg.sheet = { t: "trade", partner: others[0].id, give: {}, get: {}, gc: 0, rc: 0, stage: "edit" };
+    gg.sheet = { t: "trade", me: w, partner: others[0].id, give: {}, get: {}, gc: 0, rc: 0, stage: "edit" };
     R();
   }
 
@@ -1679,13 +1701,13 @@ function TycoonGame() {
     const giveIdx = Object.keys(sh.give).map(Number);
     const getIdx = Object.keys(sh.get).map(Number);
     const recv = val(giveIdx, sh.partner) + (sh.gc || 0);
-    const lose = val(getIdx, gg.cur) + (sh.rc || 0);
+    const lose = val(getIdx, sh.me == null ? gg.cur : sh.me) + (sh.rc || 0);
     return recv >= lose * 1.15 && recv > 0;
   }
 
   function execTrade(sh) {
     const gg = Sr.current;
-    const a = gg.cur, b = sh.partner;
+    const a = sh.me == null ? gg.cur : sh.me, b = sh.partner;
     Object.keys(sh.give).forEach((k) => { gg.owner[+k] = b; });
     Object.keys(sh.get).forEach((k) => { gg.owner[+k] = a; });
     const gc = Math.min(sh.gc || 0, gg.players[a].cash);
@@ -1788,6 +1810,7 @@ function TycoonGame() {
       mort: {},
       hist: [[], [], [], []],
       railPid: 0,
+      sheetSeat: null,
       openDeed: null,
       fdeck: shuffle(FORTUNE.map((_, i) => i)),
       cdeck: shuffle(CHEST.map((_, i) => i)),
@@ -1804,6 +1827,7 @@ function TycoonGame() {
 
   function close() {
     S.tap();
+    Sr.current.sheetSeat = null;
     const gg = Sr.current;
     if (!gg) return;
     gg.sheet = null;
@@ -1888,9 +1912,17 @@ function TycoonGame() {
       side === "left" ? { left: 0, top: 0, bottom: 0, right: "24%" } :
       { left: "24%", top: 0, bottom: 0, right: 0 };
     const lbl = cellLabel(sp);
-    const innerW =
-      side === "bottom" || side === "top" ? CW :
-      sp.t === "prop" ? CR * 0.76 : CR;
+    const innerW = CW;
+    const deep = (sp.t === "prop" ? CR * 0.76 : CR);
+    const faceStyle =
+      side === "bottom" ? null :
+      side === "top" ? { transform: "rotate(180deg)" } :
+      {
+        position: "absolute", left: "50%", top: "50%",
+        width: ((CW / deep) * 100).toFixed(2) + "%",
+        height: ((deep / CW) * 100).toFixed(2) + "%",
+        transform: "translate(-50%,-50%) rotate(" + (side === "left" ? "90" : "-90") + "deg)",
+      };
     const nm = lbl ? (
       <span className="nm" style={{ fontSize: nameFS(lbl, innerW).toFixed(2) + "cqw" }}>{lbl}</span>
     ) : null;
@@ -1918,7 +1950,9 @@ function TycoonGame() {
         }}
       >
         {bar}
-        <div className="cInner" style={innerPos}>{inner}</div>
+        <div className="cInner" style={innerPos}>
+          <div className="cFace" style={faceStyle}>{inner}</div>
+        </div>
         {own !== undefined && <div className="ownRing" style={{ boxShadow: "inset 0 0 0 2.5px " + PC[own] }} />}
         {isM && <div className="mortB">M</div>}
       </div>
@@ -1947,30 +1981,83 @@ function TycoonGame() {
     );
   }
 
+  function openFor(pl, t) {
+    if (g.sheet || g.winner !== null || pl.bankrupt) return;
+    S.tap();
+    g.sheetSeat = pl.id;
+    if (t === "trade") openTrade(pl.id);
+    else { g.sheet = { t: "manage", pid: pl.id }; R(); }
+  }
+
   function renderChip(pl) {
     const hist = g.hist[pl.id] || [];
+    const deeds = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === pl.id).sort((a, b) => a - b);
     return (
       <div
-        key={pl.id}
-        className={"chip" + (pl.id === g.railPid ? " chipSel" : "") + (pl.id === g.cur ? " chipCur" : "") + (pl.bankrupt ? " chipDead" : "")}
-        style={{ color: PC[pl.id] }}
-        onClick={() => { S.tap(); g.railPid = pl.id; R(); }}
+        className={"pnl" + (pl.id === g.cur ? " pnlCur" : "") + (pl.bankrupt ? " pnlDead" : "")}
+        style={pl.id === g.cur
+          ? { background: PC[pl.id], borderColor: PC[pl.id], color: "#171310" }
+          : { color: PC[pl.id] }}
       >
-        <div className="chipTop">
-          <Token i={pl.id} kind={pl.tok} cls="chipPawn" />
-          <span className="chipName">{pl.name}</span>
+        <div className="pnlWho">
+          <Token i={pl.id} kind={pl.tok} cls="pnlPawn" />
+          <div className="pnlId">
+            <input
+              className="pnlName"
+              value={pl.name}
+              maxLength={14}
+              onChange={(e) => { pl.name = e.target.value || " "; R(); }}
+              onFocus={(e) => e.target.select()}
+            />
+            <div className="pnlCash">{pl.bankrupt ? "OUT" : fmt(pl.cash)}</div>
+          </div>
+          <div className="pnlFlags">
+            {pl.inJail && <span>🔒</span>}
+            {pl.cards.length > 0 && <span>🎟️</span>}
+            {!pl.human && <span className="mini">CPU</span>}
+          </div>
         </div>
-        <div className="chipCash">{pl.bankrupt ? "OUT" : fmt(pl.cash)}</div>
-        <div className="chipLedger">
+
+        <div className="pnlActs">
+          <button className="pnlBtn" onClick={() => openFor(pl, "manage")}>Build</button>
+          <button className="pnlBtn" onClick={() => openFor(pl, "trade")}>Trade</button>
+        </div>
+
+        <div className="pnlLedger">
           {hist.map((h, n) => (
-            <span key={h.id} className={"chipAmt " + (h.neg ? "fneg" : "fpos") + (n === 0 ? " chipAmtNew" : "")}>{h.txt}</span>
+            <span key={h.id} className={"pnlAmt " + (h.neg ? "fneg" : "fpos") + (n === 0 ? " pnlAmtNew" : "")}>{h.txt}</span>
           ))}
         </div>
-        <div className="chipBadges">
-          {pl.inJail && <span>🔒</span>}
-          {pl.cards.length > 0 && <span>🎟️{pl.cards.length > 1 ? "×" + pl.cards.length : ""}</span>}
-          {!pl.human && <span className="mini">CPU</span>}
+
+        <div className="pnlDeeds">
+          {deeds.length === 0 && <span className="pnlNone">no property</span>}
+          {deeds.map((i) => {
+            const sp = BOARD[i];
+            const h = g.houses[i] || 0;
+            const col = sp.t === "prop" ? GROUPS[sp.g].c : sp.t === "station" ? "#9AA6B4" : "#4FA895";
+            const live = deedRows(i).rows.filter((r) => r[2])[0];
+            return (
+              <button
+                key={i}
+                className={"pd" + (g.mort[i] ? " pdM" : "")}
+                onClick={() => { if (!g.sheet && g.winner === null) { S.tap(); g.sheet = { t: "info", idx: i }; R(); } }}
+              >
+                <span className="pdBar" style={{ background: col }}>
+                  {h > 0 && <span className="pdH">{h === 5 ? "HOTEL" : "🏠 " + h}</span>}
+                </span>
+                <span className="pdN">{cellLabel(sp)}</span>
+                <span className="pdMid">
+                  <span className="pdLbl">{g.mort[i] ? "Mortgaged" : live[0]}</span>
+                  <span className="pdR">
+                    {g.mort[i] ? "—" : typeof live[1] === "number" ? "$" + live[1] : live[1]}
+                  </span>
+                </span>
+                <span className="pdFoot">{fmt(sp.price)}</span>
+              </button>
+            );
+          })}
         </div>
+
         {g.float.filter((f) => f.pid === pl.id).map((f) => (
           <span key={f.id} className={"flt " + (f.neg ? "fneg" : "fpos")}>{f.txt}</span>
         ))}
@@ -2009,68 +2096,6 @@ function TycoonGame() {
       rows: [["1 owned", "4× dice", !both], ["2 owned", "10× dice", both]],
       foot: [["Mortgage", "$" + sp.price / 2]],
     };
-  }
-
-  function renderDeed(i) {
-    const sp = BOARD[i];
-    const col = sp.t === "prop" ? GROUPS[sp.g].c : sp.t === "station" ? "#9AA6B4" : "#4FA895";
-    const h = g.houses[i] || 0;
-    const { rows, foot } = deedRows(i);
-    const open = g.openDeed === i;
-    const live = rows.filter((r) => r[2])[0] || rows[0];
-    return (
-      <div
-        key={i}
-        className={"dcard" + (g.mort[i] ? " dcardM" : "") + (open ? " dcOpen" : "")}
-        onClick={() => { S.tap(); g.openDeed = open ? null : i; R(); }}
-      >
-        <div className="dcBar" style={{ background: col }} />
-        <div className="dcName">{sp.name}</div>
-        <div className="dcPrice">
-          <span>{fmt(sp.price)}</span>
-          {h > 0 && <span className="dcH">{h === 5 ? "🏨 Hotel" : "🏠 ×" + h}</span>}
-          {g.mort[i] && <span className="dcM">MORTGAGED</span>}
-        </div>
-        <div className="dcLive">
-          <span>{g.mort[i] ? "No rent" : live[0]}</span>
-          <b>{g.mort[i] ? "—" : typeof live[1] === "number" ? "$" + live[1] : live[1]}</b>
-        </div>
-        <div className="dcBody">
-          <div className="dcRows">
-            {rows.map((r, n) => (
-              <div key={n} className={"dcRow" + (r[2] ? " dcNow" : "")}>
-                <span>{r[0]}</span>
-                <b>{typeof r[1] === "number" ? "$" + r[1] : r[1]}</b>
-              </div>
-            ))}
-          </div>
-          <div className="dcFoot">
-            {foot.map((f, n) => (<span key={n}>{f[0]} <b>{f[1]}</b></span>))}
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  function renderRail() {
-    const pl = g.players[g.railPid] || g.players[0];
-    const deeds = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === pl.id).sort((a, b) => a - b);
-    return (
-      <div className="rail">
-        <div className="railHead" style={{ color: PC[pl.id] }}>
-          <input
-            className="railName"
-            value={pl.name}
-            maxLength={14}
-            onChange={(e) => { pl.name = e.target.value || " "; R(); }}
-            onFocus={(e) => e.target.select()}
-          />
-          <span className="railCount">{deeds.length} deed{deeds.length === 1 ? "" : "s"}</span>
-        </div>
-        {deeds.length === 0 && <div className="railNone">No property yet.</div>}
-        {deeds.map((i) => renderDeed(i))}
-      </div>
-    );
   }
 
   function rentPreview(i) {
@@ -2285,12 +2310,13 @@ function TycoonGame() {
         );
       }
       case "manage": {
-        const p = cur();
-        const mine = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === g.cur).sort((a, b) => a - b);
+        const mid = sh.pid == null ? g.cur : sh.pid;
+        const p = g.players[mid];
+        const mine = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === mid).sort((a, b) => a - b);
         const d = g.debt;
         return (
           <Sheet locked={!!d} onClose={close}>
-            <div className="shTitle">Your properties</div>
+            <div className="shTitle" style={{ color: PC[mid] }}>{p.name} · properties</div>
             {d && (
               <div className="debtBox">
                 Owe {fmt(d.amt)} to {d.to !== null && d.to !== undefined && d.to >= 0 ? g.players[d.to].name : "the bank"} · cash {fmt(p.cash)}
@@ -2313,17 +2339,17 @@ function TycoonGame() {
                     <span className="mH">{h === 5 ? "🏨" : h > 0 ? "🏠×" + h : ""}</span>
                     {sp.t === "prop" && (
                       <>
-                        <button className="mBtn" disabled={!canSell(i)} onClick={() => sellHouse(i)}>−</button>
-                        <button className="mBtn" disabled={!canBuild(i)} onClick={() => build(i)}>+</button>
+                        <button className="mBtn" disabled={!canSell(i, mid)} onClick={() => sellHouse(i, mid)}>−</button>
+                        <button className="mBtn" disabled={!canBuild(i, mid)} onClick={() => build(i, mid)}>+</button>
                       </>
                     )}
                     {!g.mort[i] && (
-                      <button className="mBtn2" disabled={!canMort(i)} onClick={() => mortgage(i)}>
+                      <button className="mBtn2" disabled={!canMort(i, mid)} onClick={() => mortgage(i, mid)}>
                         Mort. +{fmt(BOARD[i].price / 2)}
                       </button>
                     )}
                     {g.mort[i] && (
-                      <button className="mBtn2" disabled={!canUnmort(i)} onClick={() => unmortgage(i)}>
+                      <button className="mBtn2" disabled={!canUnmort(i, mid)} onClick={() => unmortgage(i, mid)}>
                         Lift −{fmt(Math.ceil(BOARD[i].price * 0.55))}
                       </button>
                     )}
@@ -2418,8 +2444,9 @@ function TycoonGame() {
         );
       }
       case "trade": {
-        const me = cur();
-        const others = alive().filter((p) => p.id !== g.cur);
+        const meId = sh.me == null ? g.cur : sh.me;
+        const me = g.players[meId];
+        const others = alive().filter((p) => p.id !== meId);
         if (sh.stage === "review") {
           const pt = g.players[sh.partner];
           return (
@@ -2452,7 +2479,7 @@ function TycoonGame() {
             <div className="tCols">
               <div className="tCol">
                 <div className="tHead">You give</div>
-                {tradeable(g.cur).map((i) => tRow(i, sh.give))}
+                {tradeable(meId).map((i) => tRow(i, sh.give))}
                 <div className="tHead">+ cash (max {fmt(me.cash)})</div>
                 <input
                   className="tCash"
@@ -2548,6 +2575,7 @@ function TycoonGame() {
 
   function renderGame() {
     const p = cur();
+    const plan = seatPlan(g.players.length);
     const humanTurn = p.human && g.winner === null;
     return (
       <>
@@ -2567,9 +2595,22 @@ function TycoonGame() {
           <button className="hBtn" onClick={() => { if (!g.sheet) { g.sheet = { t: "help" }; R(); } }}>?</button>
           <button className="hBtn" onClick={() => { if (!g.sheet) { g.sheet = { t: "newgame" }; R(); } }}>↺</button>
         </div>
-        <div className="main">
-        {renderRail()}
-        <div className="boardWrap">
+        <div
+          className="table"
+          style={{
+            gridTemplateColumns: (plan.indexOf("L") >= 0 ? "var(--seatH)" : "0px") + " minmax(0,1fr) " + (plan.indexOf("R") >= 0 ? "var(--seatH)" : "0px"),
+            gridTemplateRows: (plan.indexOf("T") >= 0 ? "var(--seatH)" : "0px") + " minmax(0,1fr) var(--seatH)",
+          }}
+        >
+        {["T", "L", "R", "B"].map((pos) => {
+          const k = plan.indexOf(pos);
+          return (
+            <div key={pos} className={"seat seat" + pos}>
+              {k >= 0 && g.players[k] && renderChip(g.players[k])}
+            </div>
+          );
+        })}
+        <div className="boardCell">
           <div className={"camWrap" + (iso ? " iso" : "")}>
           <div className="board">
             {BOARD.map((sp, i) => renderCell(sp, i))}
@@ -2577,7 +2618,7 @@ function TycoonGame() {
             <div className="center">
               <div className="wordmark">TYCOON</div>
               <div className="logbox" onClick={() => { if (!g.sheet && g.winner === null) { g.sheet = { t: "log" }; R(); } }}>
-                {g.log.slice(-4).map((l, i) => (<div key={i} className="logln">{l}</div>))}
+                <div className="logln">{g.log[g.log.length - 1]}</div>
               </div>
               <div className="curRow">
                 <span className="curDot" style={{ background: PC[g.cur] }} />
@@ -2619,9 +2660,6 @@ function TycoonGame() {
           </div>
         </div>
         </div>
-        <div className="strip" style={{ gridTemplateColumns: "repeat(" + g.players.length + ",1fr)" }}>
-          {g.players.map((pl) => renderChip(pl))}
-        </div>
         {g.sheet && renderSheet()}
         {g.winner !== null && renderWinner()}
       </>
@@ -2629,7 +2667,10 @@ function TycoonGame() {
   }
 
   return (
-    <div className="app">
+    <div className="app" style={{
+        "--seat": (g ? SEAT_ROT[seatPlan(g.players.length)[g.sheetSeat != null ? g.sheetSeat : g.cur]] || 0 : 0) + "deg",
+        "--turn": (g ? SEAT_ROT[seatPlan(g.players.length)[g.cur]] || 0 : 0) + "deg",
+      }}>
       <style>{CSS}</style>
       {!g ? renderSetup() : renderGame()}
     </div>
