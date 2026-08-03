@@ -744,6 +744,14 @@ button { touch-action: manipulation; }
   font-weight: 600; cursor: pointer; font-family: var(--ui); color: var(--dim2); }
 .suOn { background: #EDE6DA; color: #16140F; }
 .btnBig { margin-top: 18px; padding: 13px 44px; font-size: 14px; flex: none; }
+.lobby { width: 100%; max-width: 420px; margin-top: 18px; text-align: center; }
+.lobRule { height: 1px; background: linear-gradient(90deg, transparent, var(--line2), transparent); margin-bottom: 14px; }
+.lobT { font-family: var(--cond); font-size: 12px; letter-spacing: .18em; text-transform: uppercase;
+  color: var(--dim); display: flex; align-items: center; justify-content: center; gap: 6px; }
+.lobDot { width: 6px; height: 6px; border-radius: 50%; background: var(--teal); box-shadow: 0 0 8px var(--teal); }
+.lobSub { font-size: 11.5px; color: var(--dim2); margin: 6px 0 10px; line-height: 1.5; }
+.lobBtns { display: flex; gap: 8px; }
+.lobSeat { display: flex; align-items: center; justify-content: space-between; margin-top: 12px; }
 .suHint { font-family: var(--cond); font-size: 11px; color: var(--dim2); margin-top: 10px; letter-spacing: .08em; }
 
 .winOv { background: rgba(4,4,3,.72); }
@@ -810,7 +818,10 @@ function Confetti() {
 /* ================= APP ================= */
 function TycoonGame() {
   const [, setV] = useState(0);
-  const R = () => setV((v) => v + 1);
+  const R = () => {
+    if (netRef.current.on && netRef.current.role === "host") setTimeout(broadcast, 0);
+    setV((v) => v + 1);
+  };
   const Sr = useRef(null);
   const uiRes = useRef(null);
   const debtRes = useRef(null);
@@ -826,6 +837,157 @@ function TycoonGame() {
   const [muted, setMuted] = useState(false);
   const [count, setCount] = useState(4);
   const [iso, setIso] = useState(false);
+  const [net, setNet] = useState({ on: false, role: null, seat: 0, status: "" });
+  const [server, setServer] = useState(false);
+  const [joinSeat, setJoinSeat] = useState(0);
+  const netRef = useRef({ on: false, role: null, seat: 0, id: 0 });
+  const esRef = useRef(null);
+  const txRef = useRef({ timer: null, pending: false });
+
+  /* is this page being served by server.js, or is it just static hosting? */
+  useEffect(() => {
+    let gone = false;
+    fetch("/net-ping", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((j) => { if (!gone && j && j.ok) setServer(true); })
+      .catch(() => {});
+    return () => { gone = true; };
+  }, []);
+
+  function netSend(msg) {
+    const n = netRef.current;
+    try {
+      fetch("/send", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ ...msg, from: n.id }),
+      });
+    } catch (e) {}
+  }
+
+  /* the host mirrors the whole game state; it is one plain object, so this is enough */
+  function broadcast() {
+    const n = netRef.current;
+    if (!n.on || n.role !== "host") return;
+    const t = txRef.current;
+    if (t.timer) { t.pending = true; return; }
+    netSend({ k: "state", state: Sr.current });
+    t.timer = setTimeout(() => {
+      t.timer = null;
+      if (t.pending) { t.pending = false; broadcast(); }
+    }, 70);
+  }
+
+  function netConnect(role, seat, after) {
+    const n = netRef.current;
+    n.role = role;
+    n.seat = seat;
+    n.on = true;
+    if (esRef.current) esRef.current.close();
+    const es = new EventSource("/events");
+    esRef.current = es;
+    es.onmessage = (ev) => {
+      let m = null;
+      try { m = JSON.parse(ev.data); } catch (e) { return; }
+      const me = netRef.current;
+      if (m.k === "welcome") {
+        me.id = m.id;
+        if (me.role === "host") netSend({ k: "claim" });
+        setNet({ on: true, role: me.role, seat: me.seat, status: "connected" });
+        if (after) after();
+        return;
+      }
+      if (m.k === "state" && me.role === "guest") {
+        Sr.current = m.state;
+        R();
+        return;
+      }
+      if (m.k === "act" && me.role === "host") {
+        runAct(m.name, m.args || [], m.seat);
+        return;
+      }
+      if (m.k === "hostgone" && me.role === "guest") {
+        setNet({ on: true, role: "guest", seat: me.seat, status: "host left" });
+        Sr.current = null;
+        R();
+      }
+    };
+    es.onerror = () => setNet((v) => ({ ...v, status: "reconnecting…" }));
+  }
+
+  /* every interactive control goes through this: run it here if we own the
+     game, otherwise ask the host to run it */
+  function act(name, ...args) {
+    const n = netRef.current;
+    if (!n.on || n.role === "host") return runAct(name, args, n.on ? n.seat : null);
+    netSend({ k: "act", name, args, seat: n.seat });
+  }
+
+  function runAct(name, args, seat) {
+    const gg = Sr.current;
+    if (!gg) return;
+    const a = args || [];
+    /* a guest may only act for its own seat */
+    const sh = gg.sheet;
+    if (seat != null) {
+      const turnOnly = ["roll", "endTurn", "jailPay", "jailCard", "jailRoll", "buyNow"];
+      if (turnOnly.indexOf(name) >= 0 && seat !== gg.cur) return;
+      if (name === "ui") {
+        const owner = sh && sh.t === "auction" ? sh.pid : gg.cur;
+        if (seat !== owner) return;
+      }
+      if ((name === "tradeAccept" || name === "tradeDecline") && sh && seat !== sh.partner) return;
+      if (name === "propose" && sh && sh.me != null && seat !== sh.me) return;
+    }
+    switch (name) {
+      case "roll": playRoll(a[0]); break;
+      case "ui": uiDone(a[0]); break;
+      case "close": close(); break;
+      case "endTurn": nextTurn(); break;
+      case "jailPay": jailPay(); break;
+      case "jailCard": jailCard(); break;
+      case "jailRoll": jailAttempt(); break;
+      case "buyNow": buyProp(gg.cur, a[0], BOARD[a[0]].price); uiDone("bought"); break;
+      case "sheet": {
+        if (gg.sheet || gg.winner !== null) break;
+        gg.sheet = a[0];
+        R();
+        break;
+      }
+      case "seatSheet": {
+        const pid = a[0];
+        if (seat != null && seat !== pid) break;
+        openFor(gg.players[pid], a[1]);
+        break;
+      }
+      case "build": if (seat == null || seat === a[1]) build(a[0], a[1]); R(); break;
+      case "sell": if (seat == null || seat === a[1]) sellHouse(a[0], a[1]); R(); break;
+      case "mort": if (seat == null || seat === a[1]) mortgage(a[0], a[1]); R(); break;
+      case "unmort": if (seat == null || seat === a[1]) unmortgage(a[0], a[1]); R(); break;
+      case "sheetSet": {
+        if (!gg.sheet) break;
+        Object.keys(a[0]).forEach((k) => { gg.sheet[k] = a[0][k]; });
+        R();
+        break;
+      }
+      case "tradeToggle": {
+        const sh = gg.sheet;
+        if (!sh || sh.t !== "trade") break;
+        const bag = a[0] === "give" ? sh.give : sh.get;
+        if (bag[a[1]]) delete bag[a[1]]; else bag[a[1]] = 1;
+        R();
+        break;
+      }
+      case "rename": if (seat == null || seat === a[0]) { gg.players[a[0]].name = a[1]; R(); } break;
+      case "propose": proposeTrade(); break;
+      case "tradeAccept": execTrade(gg.sheet); gg.sheet = null; R(); break;
+      case "tradeDecline": log(gg.players[gg.sheet.partner].name + " declines the trade."); gg.sheet = null; R(); break;
+      case "payDebt": payDebt(); break;
+      case "bankrupt": doBankrupt(); break;
+      case "restart": Sr.current = null; R(); break;
+      default: break;
+    }
+  }
   const [drag, setDrag] = useState(null);
   const dragRef = useRef(null);
 
@@ -853,7 +1015,7 @@ function TycoonGame() {
     const dist = Math.sqrt(dx * dx + dy * dy);
     const ms = Math.max(40, Date.now() - d.t0);
     setDrag(null);
-    playRoll(0.4 + Math.min(1, dist / 150) * 0.6 + Math.min(0.35, (dist / ms) * 0.25));
+    act("roll", 0.4 + Math.min(1, dist / 150) * 0.6 + Math.min(0.35, (dist / ms) * 0.25));
   }
 
   /* ---------- tiny helpers ---------- */
@@ -1660,6 +1822,7 @@ function TycoonGame() {
   useEffect(() => {
     const gg = Sr.current;
     if (!gg || gg.winner !== null) return;
+    if (netRef.current.on && netRef.current.role !== "host") return;
     const p = gg.players[gg.cur];
     if (!p.human && !p.bankrupt && gg.phase === "pre" && !gg.sheet && !botBusy.current) {
       botBusy.current = true;
@@ -1878,8 +2041,52 @@ function TycoonGame() {
             </div>
           ))}
         </div>
-        <button className="btn btnBig" onClick={startGame}>Start game</button>
-        <div className="suHint">Pass-and-play · $1,500 each · last one standing wins</div>
+        <button className="btn btnBig" onClick={() => { if (net.on && net.role === "host") startGame(); else if (!net.on) startGame(); }}>
+          {net.on && net.role === "host" ? "Start for everyone" : "Start game"}
+        </button>
+        <div className="suHint">
+          {net.on && net.role === "host" ? "Everyone joined will play on their own device"
+            : "Pass-and-play · $1,500 each · last one standing wins"}
+        </div>
+
+        {server && !net.on && (
+          <div className="lobby">
+            <div className="lobRule" />
+            <div className="lobT">Play on separate devices</div>
+            <div className="lobSub">Everyone on this Wi-Fi opens this same address.</div>
+            <div className="lobBtns">
+              <button className="btn2" onClick={() => { S.tap(); netConnect("host", 0); }}>Host the game</button>
+              <button className="btn2" onClick={() => { S.tap(); netConnect("guest", joinSeat); }}>Join a game</button>
+            </div>
+            <div className="lobSeat">
+              <span className="suCountL">Join as</span>
+              <div className="suSeg">
+                {[0, 1, 2, 3].map((n) => (
+                  <button
+                    key={n}
+                    className={"suSegB" + (joinSeat === n ? " suOn" : "")}
+                    onClick={() => { S.tap(); setJoinSeat(n); }}
+                  >{n + 1}</button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {net.on && (
+          <div className="lobby">
+            <div className="lobRule" />
+            <div className="lobT">
+              {net.role === "host" ? "Hosting" : "Joined as player " + (net.seat + 1)}
+              <span className="lobDot" /> {net.status}
+            </div>
+            <div className="lobSub">
+              {net.role === "host"
+                ? "Friends open this address and tap Join. Keep this tab open — it runs the game."
+                : "Waiting for the host to start."}
+            </div>
+          </div>
+        )}
       </div>
     );
   }
@@ -1989,6 +2196,8 @@ function TycoonGame() {
     else { g.sheet = { t: "manage", pid: pl.id }; R(); }
   }
 
+  const mayAct = (pid) => (!net.on ? true : net.seat === pid);
+
   function renderChip(pl) {
     const hist = g.hist[pl.id] || [];
     const deeds = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === pl.id).sort((a, b) => a - b);
@@ -2006,7 +2215,7 @@ function TycoonGame() {
               className="pnlName"
               value={pl.name}
               maxLength={14}
-              onChange={(e) => { pl.name = e.target.value || " "; R(); }}
+              onChange={(e) => act("rename", pl.id, e.target.value || " ")}
               onFocus={(e) => e.target.select()}
             />
             <div className="pnlCash">{pl.bankrupt ? "OUT" : fmt(pl.cash)}</div>
@@ -2019,8 +2228,8 @@ function TycoonGame() {
         </div>
 
         <div className="pnlActs">
-          <button className="pnlBtn" onClick={() => openFor(pl, "manage")}>Build</button>
-          <button className="pnlBtn" onClick={() => openFor(pl, "trade")}>Trade</button>
+          <button className="pnlBtn" disabled={!mayAct(pl.id)} onClick={() => act("seatSheet", pl.id, "manage")}>Build</button>
+          <button className="pnlBtn" disabled={!mayAct(pl.id)} onClick={() => act("seatSheet", pl.id, "trade")}>Trade</button>
         </div>
 
         <div className="pnlLedger">
@@ -2040,7 +2249,7 @@ function TycoonGame() {
               <button
                 key={i}
                 className={"pd" + (g.mort[i] ? " pdM" : "")}
-                onClick={() => { if (!g.sheet && g.winner === null) { S.tap(); g.sheet = { t: "info", idx: i }; R(); } }}
+                onClick={() => { S.tap(); act("sheet", { t: "info", idx: i }); }}
               >
                 <span className="pdBar" style={{ background: col }}>
                   {h > 0 && <span className="pdH">{h === 5 ? "HOTEL" : "🏠 " + h}</span>}
@@ -2129,17 +2338,14 @@ function TycoonGame() {
     return null;
   }
 
-  function tRow(i, set) {
+  function tRow(i, set, side) {
     const sp = BOARD[i];
     const on = !!set[i];
     return (
       <button
         key={i}
         className={"tItem" + (on ? " tOn" : "")}
-        onClick={() => {
-          if (on) delete set[i]; else set[i] = true;
-          R();
-        }}
+        onClick={() => act("tradeToggle", side, i)}
       >
         <span className="gDot" style={{ background: sp.g ? GROUPS[sp.g].c : "#9AA0A6" }} />
         <span>{sp.name}{g.mort[i] ? " (M)" : ""}</span>
@@ -2178,11 +2384,11 @@ function TycoonGame() {
               <button
                 className="btn"
                 disabled={p.cash < sp.price}
-                onClick={() => { buyProp(g.cur, i, sp.price); uiDone("bought"); }}
+                onClick={() => act("buyNow", i)}
               >
                 Buy for {fmt(sp.price)}
               </button>
-              <button className="btn2" onClick={() => uiDone("auction")}>Auction it</button>
+              <button className="btn2" onClick={() => act("ui", "auction")}>Auction it</button>
             </div>
           </Sheet>
         );
@@ -2199,11 +2405,11 @@ function TycoonGame() {
             <div className="shSub2">{p.name} — your move · cash {fmt(p.cash)}</div>
             <div className="shBtns">
               {[10, 50, 100].map((inc) => (
-                <button key={inc} className="btn2 btnS" disabled={sh.bid + inc > p.cash} onClick={() => uiDone(inc)}>
+                <button key={inc} className="btn2 btnS" disabled={sh.bid + inc > p.cash} onClick={() => act("ui", inc)}>
                   +${inc}
                 </button>
               ))}
-              <button className="btn btnS" onClick={() => uiDone("pass")}>Pass</button>
+              <button className="btn btnS" onClick={() => act("ui", "pass")}>Pass</button>
             </div>
           </Sheet>
         );
@@ -2214,7 +2420,7 @@ function TycoonGame() {
           <div className="scrim scrimC">
             <div className="deckWrap">
               <div className="deckTag">{isF ? "✦ Fortune" : "✚ Chest"}</div>
-              <button className={"cardBack " + (isF ? "cardF" : "cardC")} onClick={() => uiDone()}>
+              <button className={"cardBack " + (isF ? "cardF" : "cardC")} onClick={() => act("ui")}>
                 <span className="cbMark">{isF ? "✦" : "✚"}</span>
                 <span className="cbHint">{cur().human ? "tap to draw" : "drawing…"}</span>
               </button>
@@ -2230,7 +2436,7 @@ function TycoonGame() {
             <div className={"cardM " + (isF ? "cardF" : "cardC")}>
               <div className="cardTag">{isF ? "✦ FORTUNE" : "✚ CHEST"}</div>
               <div className="cardTxt">{c.t}</div>
-              {cur().human && <button className="btn btnFull" onClick={() => uiDone()}>OK</button>}
+              {cur().human && <button className="btn btnFull" onClick={() => act("ui")}>OK</button>}
             </div>
           </div>
         );
@@ -2289,22 +2495,22 @@ function TycoonGame() {
             <div className="shSub2">
               {short ? "You're short — you'll need to raise funds next." : "You hold " + fmt(cur().cash) + "."}
             </div>
-            <button className="btn btnFull" onClick={() => uiDone()}>{short ? "Continue" : "Hand over " + fmt(sh.amt)}</button>
+            <button className="btn btnFull" onClick={() => act("ui")}>{short ? "Continue" : "Hand over " + fmt(sh.amt)}</button>
           </Sheet>
         );
       }
       case "jail": {
         const p = cur();
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">🔒 {p.name} is in Jail</div>
             <div className="shSub">Roll doubles to walk free · attempt {p.jailTries + 1} of 3</div>
             <div className="shBtns">
-              <button className="btn" onClick={() => jailAttempt()}>🎲 Roll for doubles</button>
+              <button className="btn" onClick={() => act("jailRoll")}>🎲 Roll for doubles</button>
             </div>
             <div className="shBtns">
-              <button className="btn2" disabled={p.cash < 50} onClick={() => jailPay()}>Pay $50 bail</button>
-              <button className="btn2" disabled={p.cards.length === 0} onClick={() => jailCard()}>Use 🎟️ card</button>
+              <button className="btn2" disabled={p.cash < 50} onClick={() => act("jailPay")}>Pay $50 bail</button>
+              <button className="btn2" disabled={p.cards.length === 0} onClick={() => act("jailCard")}>Use 🎟️ card</button>
             </div>
           </Sheet>
         );
@@ -2315,14 +2521,14 @@ function TycoonGame() {
         const mine = Object.keys(g.owner).map(Number).filter((i) => g.owner[i] === mid).sort((a, b) => a - b);
         const d = g.debt;
         return (
-          <Sheet locked={!!d} onClose={close}>
+          <Sheet locked={!!d} onClose={() => act("close")}>
             <div className="shTitle" style={{ color: PC[mid] }}>{p.name} · properties</div>
             {d && (
               <div className="debtBox">
                 Owe {fmt(d.amt)} to {d.to !== null && d.to !== undefined && d.to >= 0 ? g.players[d.to].name : "the bank"} · cash {fmt(p.cash)}
                 <div className="shBtns">
-                  <button className="btn" disabled={p.cash < d.amt} onClick={payDebt}>Pay {fmt(d.amt)}</button>
-                  <button className="btnDanger" onClick={doBankrupt}>Go bankrupt</button>
+                  <button className="btn" disabled={p.cash < d.amt} onClick={() => act("payDebt")}>Pay {fmt(d.amt)}</button>
+                  <button className="btnDanger" onClick={() => act("bankrupt")}>Go bankrupt</button>
                 </div>
               </div>
             )}
@@ -2339,17 +2545,17 @@ function TycoonGame() {
                     <span className="mH">{h === 5 ? "🏨" : h > 0 ? "🏠×" + h : ""}</span>
                     {sp.t === "prop" && (
                       <>
-                        <button className="mBtn" disabled={!canSell(i, mid)} onClick={() => sellHouse(i, mid)}>−</button>
-                        <button className="mBtn" disabled={!canBuild(i, mid)} onClick={() => build(i, mid)}>+</button>
+                        <button className="mBtn" disabled={!canSell(i, mid)} onClick={() => act("sell", i, mid)}>−</button>
+                        <button className="mBtn" disabled={!canBuild(i, mid)} onClick={() => act("build", i, mid)}>+</button>
                       </>
                     )}
                     {!g.mort[i] && (
-                      <button className="mBtn2" disabled={!canMort(i, mid)} onClick={() => mortgage(i, mid)}>
+                      <button className="mBtn2" disabled={!canMort(i, mid)} onClick={() => act("mort", i, mid)}>
                         Mort. +{fmt(BOARD[i].price / 2)}
                       </button>
                     )}
                     {g.mort[i] && (
-                      <button className="mBtn2" disabled={!canUnmort(i, mid)} onClick={() => unmortgage(i, mid)}>
+                      <button className="mBtn2" disabled={!canUnmort(i, mid)} onClick={() => act("unmort", i, mid)}>
                         Lift −{fmt(Math.ceil(BOARD[i].price * 0.55))}
                       </button>
                     )}
@@ -2357,7 +2563,7 @@ function TycoonGame() {
                 );
               })}
             </div>
-            {!d && <button className="btn btnFull" onClick={close}>Done</button>}
+            {!d && <button className="btn btnFull" onClick={() => act("close")}>Done</button>}
           </Sheet>
         );
       }
@@ -2366,7 +2572,7 @@ function TycoonGame() {
         const sp = BOARD[i];
         const o = g.owner[i];
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">
               {sp.g && <span className="gDot" style={{ background: GROUPS[sp.g].c }} />}
               {sp.name}
@@ -2390,22 +2596,22 @@ function TycoonGame() {
               <div className="shBtns">
                 {sp.t === "prop" && (
                   <>
-                    <button className="btn btnS" disabled={!canBuild(i)} onClick={() => { build(i); R(); }}>
+                    <button className="btn btnS" disabled={!canBuild(i)} onClick={() => act("build", i, o)}>
                       🏠 Build {fmt(GROUPS[sp.g].hc)}
                     </button>
-                    <button className="btn2 btnS" disabled={!canSell(i)} onClick={() => { sellHouse(i); R(); }}>Sell</button>
+                    <button className="btn2 btnS" disabled={!canSell(i)} onClick={() => act("sell", i, o)}>Sell</button>
                   </>
                 )}
                 <button
                   className="btn2 btnS"
                   disabled={g.mort[i] ? !canUnmort(i) : !canMort(i)}
-                  onClick={() => { if (g.mort[i]) unmortgage(i); else mortgage(i); R(); }}
+                  onClick={() => act(g.mort[i] ? "unmort" : "mort", i, o)}
                 >
                   {g.mort[i] ? "Lift " + fmt(Math.ceil(sp.price * 0.55)) : "Mortgage " + fmt(sp.price / 2)}
                 </button>
               </div>
             )}
-            <button className="btn btnFull" onClick={close}>Close</button>
+            <button className="btn btnFull" onClick={() => act("close")}>Close</button>
           </Sheet>
         );
       }
@@ -2417,7 +2623,7 @@ function TycoonGame() {
           return s + BOARD[i].price * (g.mort[i] ? 0.5 : 1) + hv;
         }, 0);
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">
               <Token i={p.id} kind={p.tok} cls="shPawn" />
               {p.name}
@@ -2439,7 +2645,7 @@ function TycoonGame() {
                 </div>
               ))}
             </div>
-            <button className="btn btnFull" onClick={close}>Close</button>
+            <button className="btn btnFull" onClick={() => act("close")}>Close</button>
           </Sheet>
         );
       }
@@ -2455,14 +2661,14 @@ function TycoonGame() {
               <div className="shSub">Hand the phone to {pt.name} to decide.</div>
               {tradeSummary(sh)}
               <div className="shBtns">
-                <button className="btn" onClick={() => { execTrade(sh); g.sheet = null; R(); }}>Accept</button>
-                <button className="btn2" onClick={() => { log(pt.name + " declines the trade."); g.sheet = null; R(); }}>Decline</button>
+                <button className="btn" onClick={() => act("tradeAccept")}>Accept</button>
+                <button className="btn2" onClick={() => act("tradeDecline")}>Decline</button>
               </div>
             </Sheet>
           );
         }
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">Propose a trade</div>
             <div className="pRow">
               {others.map((o) => (
@@ -2470,7 +2676,7 @@ function TycoonGame() {
                   key={o.id}
                   className={"pPick" + (sh.partner === o.id ? " pOn" : "")}
                   style={{ borderColor: PC[o.id] }}
-                  onClick={() => { sh.partner = o.id; sh.get = {}; sh.rc = 0; R(); }}
+                  onClick={() => act("sheetSet", { partner: o.id, get: {}, rc: 0 })}
                 >
                   {o.emoji} {o.name}
                 </button>
@@ -2479,26 +2685,26 @@ function TycoonGame() {
             <div className="tCols">
               <div className="tCol">
                 <div className="tHead">You give</div>
-                {tradeable(meId).map((i) => tRow(i, sh.give))}
+                {tradeable(meId).map((i) => tRow(i, sh.give, "give"))}
                 <div className="tHead">+ cash (max {fmt(me.cash)})</div>
                 <input
                   className="tCash"
                   type="number"
                   min="0"
                   value={sh.gc}
-                  onChange={(e) => { sh.gc = Math.max(0, Math.min(me.cash, Math.floor(+e.target.value || 0))); R(); }}
+                  onChange={(e) => act("sheetSet", { gc: Math.max(0, Math.min(me.cash, Math.floor(+e.target.value || 0))) })}
                 />
               </div>
               <div className="tCol">
                 <div className="tHead">You get</div>
-                {tradeable(sh.partner).map((i) => tRow(i, sh.get))}
+                {tradeable(sh.partner).map((i) => tRow(i, sh.get, "get"))}
                 <div className="tHead">+ cash (max {fmt(g.players[sh.partner].cash)})</div>
                 <input
                   className="tCash"
                   type="number"
                   min="0"
                   value={sh.rc}
-                  onChange={(e) => { sh.rc = Math.max(0, Math.min(g.players[sh.partner].cash, Math.floor(+e.target.value || 0))); R(); }}
+                  onChange={(e) => act("sheetSet", { rc: Math.max(0, Math.min(g.players[sh.partner].cash, Math.floor(+e.target.value || 0))) })}
                 />
               </div>
             </div>
@@ -2508,18 +2714,18 @@ function TycoonGame() {
               <button
                 className="btn"
                 disabled={Object.keys(sh.give).length + Object.keys(sh.get).length + (sh.gc || 0) + (sh.rc || 0) === 0}
-                onClick={proposeTrade}
+                onClick={() => act("propose")}
               >
                 Propose
               </button>
-              <button className="btn2" onClick={close}>Cancel</button>
+              <button className="btn2" onClick={() => act("close")}>Cancel</button>
             </div>
           </Sheet>
         );
       }
       case "help":
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">How to play</div>
             <div className="hlp">
               <p>Roll and move. Land on an unowned space to buy it — or send it to auction, where anyone can bid.</p>
@@ -2529,27 +2735,27 @@ function TycoonGame() {
               <p>Doubles roll again — three in a row means Jail. Escape by paying $50, using a 🎟️ card, or rolling doubles within three tries.</p>
               <p>Pass GO for $200. Tap any space or player for details. Last player solvent wins the city.</p>
             </div>
-            <button className="btn btnFull" onClick={close}>Close</button>
+            <button className="btn btnFull" onClick={() => act("close")}>Close</button>
           </Sheet>
         );
       case "log":
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">Game log</div>
             <div className="logFull">
               {[...g.log].reverse().map((l, i) => (<div key={i} className="logFl">{l}</div>))}
             </div>
-            <button className="btn btnFull" onClick={close}>Close</button>
+            <button className="btn btnFull" onClick={() => act("close")}>Close</button>
           </Sheet>
         );
       case "newgame":
         return (
-          <Sheet onClose={close}>
+          <Sheet onClose={() => act("close")}>
             <div className="shTitle">Start over?</div>
             <div className="shSub">The current game will be lost.</div>
             <div className="shBtns">
-              <button className="btn" onClick={() => { Sr.current = null; R(); }}>New game</button>
-              <button className="btn2" onClick={close}>Keep playing</button>
+              <button className="btn" onClick={() => act("restart")}>New game</button>
+              <button className="btn2" onClick={() => act("close")}>Keep playing</button>
             </div>
           </Sheet>
         );
@@ -2567,7 +2773,7 @@ function TycoonGame() {
           <div className="winTro">🏆</div>
           <div className="winName" style={{ color: PC[w.id] }}>{w.name}</div>
           <div className="shSub" style={{ marginBottom: 16 }}>owns the city</div>
-          <button className="btn" onClick={() => { Sr.current = null; R(); }}>Play again</button>
+          <button className="btn" onClick={() => act("restart")}>Play again</button>
         </div>
       </div>
     );
@@ -2576,7 +2782,8 @@ function TycoonGame() {
   function renderGame() {
     const p = cur();
     const plan = seatPlan(g.players.length);
-    const humanTurn = p.human && g.winner === null;
+    const mine = !net.on || net.seat === g.cur;
+    const humanTurn = p.human && g.winner === null && mine;
     return (
       <>
         <div className="hdr">
@@ -2617,7 +2824,7 @@ function TycoonGame() {
             {g.landing !== null && renderPulse()}
             <div className="center">
               <div className="wordmark">TYCOON</div>
-              <div className="logbox" onClick={() => { if (!g.sheet && g.winner === null) { g.sheet = { t: "log" }; R(); } }}>
+              <div className="logbox" onClick={() => act("sheet", { t: "log" })}>
                 <div className="logln">{g.log[g.log.length - 1]}</div>
               </div>
               <div className="curRow">
@@ -2641,15 +2848,15 @@ function TycoonGame() {
               )}
               <div className="btnRow">
                 {humanTurn && g.phase === "pre" && p.inJail && (
-                  <button className="cbtn" onClick={() => { g.sheet = { t: "jail" }; R(); }}>🔒 Jail options</button>
+                  <button className="cbtn" onClick={() => act("sheet", { t: "jail" })}>🔒 Jail options</button>
                 )}
                 {humanTurn && g.phase === "post" && (
-                  <button className="cbtn" onClick={() => nextTurn()}>End turn</button>
+                  <button className="cbtn" onClick={() => act("endTurn")}>End turn</button>
                 )}
                 {humanTurn && (g.phase === "pre" || g.phase === "post") && (
                   <>
-                    <button className="cbtn2" onClick={() => { g.sheet = { t: "manage" }; R(); }}>Build</button>
-                    <button className="cbtn2" onClick={() => openTrade()}>Trade</button>
+                    <button className="cbtn2" onClick={() => act("seatSheet", g.cur, "manage")}>Build</button>
+                    <button className="cbtn2" onClick={() => act("seatSheet", g.cur, "trade")}>Trade</button>
                   </>
                 )}
                 {!p.human && g.winner === null && <span className="thinking">thinking…</span>}
@@ -2668,7 +2875,7 @@ function TycoonGame() {
 
   return (
     <div className="app" style={{
-        "--seat": (g ? SEAT_ROT[seatPlan(g.players.length)[g.sheetSeat != null ? g.sheetSeat : g.cur]] || 0 : 0) + "deg",
+        "--seat": (net.on || !g ? 0 : SEAT_ROT[seatPlan(g.players.length)[g.sheetSeat != null ? g.sheetSeat : g.cur]] || 0) + "deg",
         "--turn": (g ? SEAT_ROT[seatPlan(g.players.length)[g.cur]] || 0 : 0) + "deg",
       }}>
       <style>{CSS}</style>
