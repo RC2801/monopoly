@@ -1,5 +1,4 @@
-/* React comes from the UMD global loaded in index.html */
-const { useState, useRef, useEffect } = React;
+import React, { useState, useRef, useEffect } from "react";
 
 /* ================= DATA ================= */
 const GROUPS = {
@@ -796,7 +795,7 @@ function Confetti() {
 }
 
 /* ================= APP ================= */
-function TycoonGame() {
+export default function TycoonGame() {
   const [, setV] = useState(0);
   const R = () => setV((v) => v + 1);
   const Sr = useRef(null);
@@ -2635,7 +2634,3 @@ function TycoonGame() {
     </div>
   );
 }
-
-
-const root = ReactDOM.createRoot(document.getElementById('root'));
-root.render(<TycoonGame />);
